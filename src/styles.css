@@ -27,6 +27,20 @@ button { cursor: pointer; }
 .brand-mark { width: 23px; height: 23px; display: grid; place-items: center; border: 2px solid var(--green); border-radius: 7px 7px 7px 2px; transform: rotate(-6deg); }
 .brand-mark span { width: 7px; height: 7px; background: #d5924e; border-radius: 2px; }
 .brand-period { color: #d5924e; }
+.tabs { display: flex; gap: 4px; padding: 4px; background: #eef1ec; border-radius: 8px; }
+.tabs button { padding: 7px 16px; color: #62706a; background: transparent; border: 0; border-radius: 5px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.tabs button:hover { color: var(--ink); }
+.tabs button.is-active { color: var(--green); background: white; box-shadow: 0 1px 2px rgba(32, 43, 40, .12); }
+.today-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 20px 0 16px; }
+.today-field { display: flex; flex-direction: column; gap: 7px; padding: 14px 16px; background: rgba(255,255,255,.96); border: 1px solid #e5e9e2; border-radius: 5px; }
+.today-field > span { color: #62706a; font-size: 11px; font-weight: 700; }
+.today-field input { width: 100%; padding: 8px 10px; color: var(--ink); background: white; border: 1px solid #dfe4dc; border-radius: 4px; font-family: var(--mono); font-size: 16px; outline: 0; }
+.today-field input:focus { border-color: var(--green); box-shadow: 0 0 0 2px var(--green-soft); }
+.today-field small { color: #89918c; font-size: 10px; line-height: 1.4; }
+.field-link { align-self: flex-start; padding: 0; color: var(--green); background: transparent; border: 0; font-size: 11px; font-weight: 700; cursor: pointer; }
+.today-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 36px 16px; color: #78817b; background: rgba(255,255,255,.7); border: 1px dashed #d8ded5; border-radius: 5px; text-align: center; font-size: 12px; }
+.today-empty strong { color: var(--ink); font-size: 14px; }
+.today-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 20px; }
 .topbar-right { display: flex; align-items: center; gap: 18px; }
 .topbar-caption, .eyebrow, .cycle-kicker, .cycle-close > span { font-family: var(--mono); font-size: 10px; letter-spacing: 1px; color: #858d87; }
 .avatar { width: 31px; height: 31px; display: grid; place-items: center; color: #2f6654; background: #e4f0e9; border-radius: 50%; font-size: 12px; font-weight: 700; }
@@ -118,6 +132,9 @@ td:first-child strong { font-weight: 700; }
 @media (max-width: 760px) {
   .topbar { height: 60px; padding: 0 18px; }
   .topbar-caption { display: none; }
+  .tabs button { padding: 6px 11px; font-size: 11px; }
+  .today-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .today-metrics { grid-template-columns: minmax(0, 1fr); }
   .page-content { padding: 31px 18px 22px; }
   .page-heading { align-items: start; }
   h1 { font-size: 24px; }

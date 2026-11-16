@@ -46,6 +46,18 @@ Para rodar os testes do leitor: `npm test`.
 
 Com o saldo de horas negativo, não é permitido fazer mais de 1h extra por dia. O app mostra um aviso quando o saldo está negativo e, com batidas diárias, marca e lista os dias em que o extra passou de 1h com o saldo acumulado negativo até o dia anterior. No relatório totalizado do Forponto não há dados por dia, então só aparece o aviso geral.
 
+## Aba "Hoje"
+
+Informe a hora de chegada (por exemplo 07:37) e o app calcula:
+
+- **Sair às, para fechar a meta:** a saída que deixa o saldo do ciclo em −5 min. Se o saldo já está dentro da meta, mostra a jornada completa.
+- **Jornada completa:** chegada + 8h48 + intervalo (60 min por padrão; o valor fica salvo).
+- **Saldo no total:** como o saldo do ciclo fica com a saída recomendada ou com a saída que você digitar em "Se eu sair às".
+- Com saldo negativo, mostra a saída máxima (1h extra) e avisa se a saída escolhida passa disso.
+- Se o saldo é grande demais para compensar só hoje, avisa e divide pelos dias úteis que restam.
+
+O saldo vem da planilha importada, quando ela é do ciclo de hoje. Dá para digitar outro saldo (`+1:42` ou `-0:36`). Chegada e saída valem só para o dia. O saldo da planilha não deve incluir o dia de hoje.
+
 ## Planilha de batidas diárias
 
 Use o botão **Baixar modelo Excel** para gerar uma planilha do ciclo selecionado. Preencha uma linha por dia com as colunas:

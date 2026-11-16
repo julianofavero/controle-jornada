@@ -13,7 +13,9 @@ import {
   X,
 } from 'lucide-react';
 import './styles.css';
-import { parseTotalsSheet } from './forponto.js';
+import { cycleMonthOf, parseTotalsSheet } from './forponto.js';
+import { formatMinutes } from './format.js';
+import TodayPanel from './TodayPanel.jsx';
 import { readRows } from './readSheet.js';
 import { EXTRA_LIMIT_MINUTES, markExtraOverLimit } from './rules.js';
 
@@ -22,9 +24,9 @@ const TOTALS_KEY = 'ritmo-jornada-totais-v1';
 const DAILY_TARGET = 8 * 60 + 48;
 const WEEKDAYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 
+// Mês de fechamento do ciclo em que hoje está (depois do dia 15, o ciclo fecha no mês seguinte).
 function currentMonth() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  return cycleMonthOf(new Date());
 }
 
 function periodFor(monthValue) {
@@ -40,12 +42,6 @@ function dateKey(date) {
 
 function formatDate(value, options = { day: '2-digit', month: 'short' }) {
   return new Intl.DateTimeFormat('pt-BR', options).format(value);
-}
-
-function formatMinutes(value, signed = false) {
-  const sign = value < 0 ? '-' : signed && value > 0 ? '+' : '';
-  const absolute = Math.abs(Math.round(value));
-  return `${sign}${Math.floor(absolute / 60)}h${String(absolute % 60).padStart(2, '0')}`;
 }
 
 function normalize(value) {
@@ -192,7 +188,22 @@ async function downloadTemplate(monthValue) {
 }
 
 function App() {
-  const [month, setMonth] = useState(currentMonth);
+  // Lembra o ciclo escolhido (ou o da última importação); sem nada salvo, usa o ciclo de hoje.
+  const [month, setMonth] = useState(() => {
+    try {
+      const saved = localStorage.getItem('ritmo-mes-v1');
+      return saved && /^\d{4}-\d{2}$/.test(saved) ? saved : currentMonth();
+    } catch {
+      return currentMonth();
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('ritmo-mes-v1', month);
+    } catch {
+      // sem armazenamento: só não lembra o mês
+    }
+  }, [month]);
   const [records, setRecords] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]');
@@ -206,6 +217,13 @@ function App() {
       return JSON.parse(localStorage.getItem(TOTALS_KEY) ?? '{}') ?? {};
     } catch {
       return {};
+    }
+  });
+  const [tab, setTab] = useState(() => {
+    try {
+      return localStorage.getItem('ritmo-aba-v1') === 'hoje' ? 'hoje' : 'fechamento';
+    } catch {
+      return 'fechamento';
     }
   });
   const [notice, setNotice] = useState('');
@@ -272,10 +290,16 @@ function App() {
       const { records: imported, skipped } = parsed;
       const unique = new Map();
       imported.forEach((record) => unique.set(record.date, record));
+      // Vai para o ciclo das datas importadas (a última data decide), como no totalizado do Forponto.
+      const lastDate = [...unique.keys()].sort().at(-1);
+      const importedMonth = cycleMonthOf(new Date(`${lastDate}T12:00:00`));
+      // Reimportar substitui os registros do ciclo importado.
+      const { start: importedStart, end: importedEnd } = periodFor(importedMonth);
       setRecords((current) => {
-        const outside = current.filter((record) => record.date < dateKey(start) || record.date > dateKey(end));
+        const outside = current.filter((record) => (record.date < dateKey(importedStart) || record.date > dateKey(importedEnd)) && !unique.has(record.date));
         return [...outside, ...unique.values()];
       });
+      setMonth(importedMonth);
       setFileName(file.name);
       setNotice(`${unique.size} dias importados${skipped ? ` · ${skipped} linha(s) ignorada(s) sem data válida` : ''}.`);
     } catch (issue) {
@@ -300,6 +324,30 @@ function App() {
   }
 
   const totalsEnd = totals?.periodEnd ? new Date(`${totals.periodEnd}T12:00:00`) : null;
+  function changeTab(next) {
+    setTab(next);
+    try {
+      localStorage.setItem('ritmo-aba-v1', next);
+    } catch {
+      // sem armazenamento: só não lembra a aba
+    }
+  }
+
+  // Aba "Hoje": o saldo da planilha só vale se o ciclo selecionado é o ciclo de hoje.
+  const todayDate = new Date();
+  const todayCycle = cycleMonthOf(todayDate);
+  const todayBalance = month === todayCycle && calculation.hasImportedRecords ? calculation.balance : null;
+  const todayLastCompDay = lastWorkday(periodFor(todayCycle).end);
+  const todayNoon = new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate(), 12);
+  const todayWorkdaysLeft = todayNoon <= todayLastCompDay ? weekdaysBetween(todayNoon, todayLastCompDay).length : 0;
+  const todayImportNote = totals?.periodEnd
+    ? `Da planilha importada, até ${totals.periodEnd.split('-').reverse().slice(0, 2).join('/')}.`
+    : 'Da planilha importada.';
+  const todayCycleName = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(periodFor(todayCycle).end);
+  const todayUnavailableNote = calculation.hasImportedRecords && month !== todayCycle
+    ? `A planilha importada é de outro ciclo; hoje está no ciclo de ${todayCycleName}. Digite o saldo.`
+    : 'Importe a planilha na aba Fechamento ou digite o saldo.';
+
   const closeIsWeekend = isWeekend(end);
   const lastCompDay = lastWorkday(end);
   const nextAfterTotals = totalsEnd ? new Date(totalsEnd.getFullYear(), totalsEnd.getMonth(), totalsEnd.getDate() + 1, 12) : null;
@@ -324,13 +372,21 @@ function App() {
           <span className="brand-mark"><span /></span>
           <span>ritmo<span className="brand-period">.</span></span>
         </a>
+        <nav className="tabs" aria-label="Seções">
+          <button type="button" className={tab === 'fechamento' ? 'is-active' : ''} aria-current={tab === 'fechamento' ? 'page' : undefined} onClick={() => changeTab('fechamento')}>Fechamento</button>
+          <button type="button" className={tab === 'hoje' ? 'is-active' : ''} aria-current={tab === 'hoje' ? 'page' : undefined} onClick={() => changeTab('hoje')}>Hoje</button>
+        </nav>
         <div className="topbar-right">
           <span className="topbar-caption">CONTROLE DE JORNADA</span>
           <span className="avatar" aria-label="Perfil">J</span>
         </div>
       </header>
 
-      <section className="page-content" id="inicio">
+      <section className="page-content" id="hoje" hidden={tab !== 'hoje'}>
+        <TodayPanel balanceFromImport={todayBalance} importNote={todayImportNote} unavailableNote={todayUnavailableNote} workdaysLeft={todayWorkdaysLeft} weekendToday={isWeekend(todayDate)} />
+      </section>
+
+      <section className="page-content" id="inicio" hidden={tab !== 'fechamento'}>
         <div className="page-heading">
           <div>
             <p className="eyebrow">SEU TEMPO, EM DIA</p>
