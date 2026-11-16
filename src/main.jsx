@@ -13,7 +13,9 @@ import {
   X,
 } from 'lucide-react';
 import './styles.css';
-import { flattenCell, parseTotalsSheet } from './forponto.js';
+import { parseTotalsSheet } from './forponto.js';
+import { readRows } from './readSheet.js';
+import { EXTRA_LIMIT_MINUTES, markExtraOverLimit } from './rules.js';
 
 const STORAGE_KEY = 'ritmo-jornada-registros-v1';
 const TOTALS_KEY = 'ritmo-jornada-totais-v1';
@@ -88,15 +90,7 @@ function getColumn(headers, candidates) {
 }
 
 async function parseWorkbook(buffer) {
-  const { default: ExcelJS } = await import('exceljs');
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
-  const sheet = workbook.worksheets[0];
-  if (!sheet) throw new Error('A planilha não tem uma aba com dados.');
-  const rows = [];
-  sheet.eachRow((row, rowNumber) => {
-    rows[rowNumber - 1] = row.values.slice(1).map(flattenCell);
-  });
+  const rows = await readRows(buffer);
   const totals = parseTotalsSheet(rows);
   if (totals) return { kind: 'totals', totals };
   const headers = rows[0] ?? [];
@@ -232,10 +226,13 @@ function App() {
   const totals = totalsByCycle[month] ?? null;
 
   const calculation = useMemo(() => {
-    const cycleRows = records
-      .filter((record) => record.date >= dateKey(start) && record.date <= dateKey(end))
-      .map((record) => ({ ...record, result: minutesForRecord(record) }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+    const cycleRows = markExtraOverLimit(
+      records
+        .filter((record) => record.date >= dateKey(start) && record.date <= dateKey(end))
+        .map((record) => ({ ...record, result: minutesForRecord(record) }))
+        .sort((a, b) => a.date.localeCompare(b.date)),
+    );
+    const overLimitDays = cycleRows.filter((row) => row.overLimit);
     const workedRows = cycleRows.filter((row) => row.result.kind === 'worked');
     const incomplete = cycleRows.filter((row) => row.result.kind === 'incomplete');
     // O totalizado do Forponto, quando existe para o ciclo, vale mais que as batidas diárias.
@@ -248,7 +245,7 @@ function App() {
     const missing = weekdayKeys.filter((day) => !recordedDates.has(day)).length;
     const hasImportedRecords = cycleRows.length > 0 || Boolean(totals);
     const hasDailyRows = cycleRows.length > 0;
-    return { cycleRows, workedRows, incomplete: totals ? [] : incomplete, extra, deficit, balance, neededToTarget, missing, hasImportedRecords, hasDailyRows };
+    return { cycleRows, workedRows, overLimitDays, incomplete: totals ? [] : incomplete, extra, deficit, balance, neededToTarget, missing, hasImportedRecords, hasDailyRows };
   }, [records, totals, start, end]);
 
   async function importFile(file) {
@@ -307,7 +304,8 @@ function App() {
   const lastCompDay = lastWorkday(end);
   const nextAfterTotals = totalsEnd ? new Date(totalsEnd.getFullYear(), totalsEnd.getMonth(), totalsEnd.getDate() + 1, 12) : null;
   const workdaysLeft = nextAfterTotals ? weekdaysBetween(nextAfterTotals, lastCompDay).length : null;
-  const noDaysToCompensate = calculation.hasImportedRecords && workdaysLeft === 0 && calculation.balance > -5;
+  const negativeBalance = calculation.hasImportedRecords && calculation.balance < 0;
+  const noDaysToCompensate =calculation.hasImportedRecords && workdaysLeft === 0 && calculation.balance > -5;
   const closeDate = formatDate(lastCompDay, { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
   const periodLabel = `${formatDate(start)} — ${formatDate(end, { day: '2-digit', month: 'short', year: 'numeric' })}`;
   const monthLabel = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(end);
@@ -361,8 +359,8 @@ function App() {
           </div>
         </section>
 
-        {(closeIsWeekend || noDaysToCompensate) && (
-          <div className="weekend-alert" role="alert">
+        {(closeIsWeekend || noDaysToCompensate || negativeBalance || calculation.overLimitDays.length > 0) && (
+          <div className="rule-alert" role="alert">
             <TriangleAlert size={16} />
             <div>
               {closeIsWeekend && (
@@ -373,6 +371,18 @@ function App() {
               )}
               {noDaysToCompensate && (
                 <p><strong>Não restam dias úteis para compensar neste ciclo.</strong> O saldo de {formatMinutes(calculation.balance, true)} fecha acima da meta de −5 min.</p>
+              )}
+              {negativeBalance && (
+                <p>
+                  <strong>Saldo negativo ({formatMinutes(calculation.balance, true)}).</strong>{' '}
+                  Enquanto o saldo estiver negativo, não é permitido fazer mais de {formatMinutes(EXTRA_LIMIT_MINUTES)} extra por dia.
+                </p>
+              )}
+              {calculation.overLimitDays.length > 0 && (
+                <p>
+                  <strong>Dias acima do limite de {formatMinutes(EXTRA_LIMIT_MINUTES)} extra com saldo negativo:</strong>{' '}
+                  {calculation.overLimitDays.map((row) => `${formatDate(new Date(`${row.date}T12:00:00`), { day: '2-digit', month: '2-digit' })} (${formatMinutes(row.result.delta, true)})`).join(', ')}.
+                </p>
               )}
             </div>
           </div>
@@ -440,7 +450,7 @@ function App() {
             <button className="upload-button" onClick={() => fileInput.current?.click()}>
               <Upload size={16} /> Selecionar arquivo
             </button>
-            <input ref={fileInput} className="sr-only" type="file" accept=".xlsx" onChange={onFileChange} />
+            <input ref={fileInput} className="sr-only" type="file" accept=".xlsx,.xls" onChange={onFileChange} />
           </div>
           {(notice || error) && (
             <div className={`import-message ${error ? 'message-error' : ''}`} role="status">
@@ -504,7 +514,7 @@ function App() {
                   const punchText = punches.some((value) => value === null)
                     ? '—'
                     : punches.map((value) => `${String(Math.floor(value / 60) % 24).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`).join(' · ');
-                  const label = result.kind === 'incomplete' ? 'Batidas incompletas' : result.kind === 'off' ? (row.status || 'Não trabalhado') : result.delta > 0 ? 'Extra' : result.delta < 0 ? 'Abaixo da jornada' : 'No horário';
+                  const label = row.overLimit ? 'Acima de 1h extra' : result.kind === 'incomplete' ? 'Batidas incompletas' : result.kind === 'off' ? (row.status || 'Não trabalhado') : result.delta > 0 ? 'Extra' : result.delta < 0 ? 'Abaixo da jornada' : 'No horário';
                   return (
                     <tr key={row.id}>
                       <td><strong>{formatDate(date, { day: '2-digit', month: 'short' })}</strong><span className="weekday">{WEEKDAYS[date.getDay()]}</span></td>
@@ -512,7 +522,7 @@ function App() {
                       <td>{result.kind === 'worked' ? formatMinutes(result.worked) : '—'}</td>
                       <td>{result.kind === 'worked' ? formatMinutes(result.target) : '—'}</td>
                       <td className={result.kind === 'worked' ? (result.delta > 0 ? 'positive' : result.delta < 0 ? 'negative' : '') : ''}>{result.kind === 'worked' ? formatMinutes(result.delta, true) : '—'}</td>
-                      <td><span className={`row-status ${result.kind === 'incomplete' ? 'row-warning' : result.kind === 'off' ? 'row-off' : result.delta > 0 ? 'row-extra' : result.delta < 0 ? 'row-short' : 'row-ok'}`}><span />{label}</span></td>
+                      <td><span className={`row-status ${row.overLimit || result.kind === 'incomplete' ? 'row-warning' : result.kind === 'off' ? 'row-off' : result.delta > 0 ? 'row-extra' : result.delta < 0 ? 'row-short' : 'row-ok'}`}><span />{label}</span></td>
                     </tr>
                   );
                 }) : (

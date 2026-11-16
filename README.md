@@ -37,6 +37,15 @@ O app lê direto o relatório **"Totalizado por Funcionário"** do Forponto (`.x
 
 Para rodar os testes do leitor: `npm test`.
 
+## Formatos aceitos
+
+- `.xlsx` (lido com ExcelJS) e `.xls` (lido com SheetJS). O leitor é escolhido pelo conteúdo do arquivo, não pela extensão, então também funciona com HTML exportado como `.xls`.
+- SheetJS vem do CDN oficial (`cdn.sheetjs.com`), pois a versão do npm está desatualizada e com falhas de segurança conhecidas.
+
+## Regra das horas extras
+
+Com o saldo de horas negativo, não é permitido fazer mais de 1h extra por dia. O app mostra um aviso quando o saldo está negativo e, com batidas diárias, marca e lista os dias em que o extra passou de 1h com o saldo acumulado negativo até o dia anterior. No relatório totalizado do Forponto não há dados por dia, então só aparece o aviso geral.
+
 ## Planilha de batidas diárias
 
 Use o botão **Baixar modelo Excel** para gerar uma planilha do ciclo selecionado. Preencha uma linha por dia com as colunas:
@@ -50,4 +59,4 @@ Use o botão **Baixar modelo Excel** para gerar uma planilha do ciclo selecionad
 | Saída | Horário final |
 | Situação | `Trabalhado`, `Folga`, `Feriado`, `Férias` ou `Afastamento` |
 
-O importador lê arquivos `.xlsx` e reconhece cabeçalhos equivalentes em português e inglês. Registros ficam salvos no `localStorage` do navegador.
+O importador lê arquivos `.xlsx` e `.xls` e reconhece cabeçalhos equivalentes em português e inglês. Registros ficam salvos no `localStorage` do navegador.
