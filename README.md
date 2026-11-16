@@ -27,7 +27,17 @@ O build gera um único arquivo, `dist/index.html`, com tudo embutido. Dá para a
 - A meta é fechar o ciclo com saldo de -5 minutos ou menor.
 - Horas excedentes ficam visíveis para compensação; o resumo também mostra déficits e saldo líquido.
 
-## Planilha
+## Relatório totalizado do Forponto
+
+O app lê direto o relatório **"Totalizado por Funcionário"** do Forponto (`.xlsx`), sem editar a planilha. Ele procura o cabeçalho `Funcionários` e as colunas `Faltas`, `AD. NOT.`, `H.E.100%`, `H.E.50%`, `H. NEG.` e `COMP. DIA`, e lê o período na linha `Período dd/mm/aaaa a dd/mm/aaaa`. O mês de fechamento é escolhido sozinho a partir da data final do período.
+
+- Saldo = `H.E.50%` menos `H. NEG.`. `H.E.100%` e adicional noturno aparecem só para conferência.
+- Se a última coluna do relatório (saldo de H.E. 50%) divergir dessa conta, o app avisa.
+- Se houver mais de um funcionário no relatório, usa o primeiro e avisa.
+
+Para rodar os testes do leitor: `npm test`.
+
+## Planilha de batidas diárias
 
 Use o botão **Baixar modelo Excel** para gerar uma planilha do ciclo selecionado. Preencha uma linha por dia com as colunas:
 

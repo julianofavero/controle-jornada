@@ -13,8 +13,10 @@ import {
   X,
 } from 'lucide-react';
 import './styles.css';
+import { flattenCell, parseTotalsSheet } from './forponto.js';
 
 const STORAGE_KEY = 'ritmo-jornada-registros-v1';
+const TOTALS_KEY = 'ritmo-jornada-totais-v1';
 const DAILY_TARGET = 8 * 60 + 48;
 const WEEKDAYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 
@@ -93,8 +95,10 @@ async function parseWorkbook(buffer) {
   if (!sheet) throw new Error('A planilha não tem uma aba com dados.');
   const rows = [];
   sheet.eachRow((row, rowNumber) => {
-    rows[rowNumber - 1] = row.values.slice(1).map((cell) => cell?.text ?? cell ?? '');
+    rows[rowNumber - 1] = row.values.slice(1).map(flattenCell);
   });
+  const totals = parseTotalsSheet(rows);
+  if (totals) return { kind: 'totals', totals };
   const headers = rows[0] ?? [];
   const columns = {
     date: getColumn(headers, ['data', 'date']),
@@ -126,7 +130,7 @@ async function parseWorkbook(buffer) {
     });
   });
   if (!records.length) throw new Error('Não encontrei nenhuma linha com uma data válida.');
-  return { records, skipped };
+  return { kind: 'daily', records, skipped };
 }
 
 function minutesForRecord(record) {
@@ -191,6 +195,14 @@ function App() {
       return [];
     }
   });
+  // Totais do relatório do Forponto, um por ciclo: { '2026-11': { he50, neg, saldo, ... } }
+  const [totalsByCycle, setTotalsByCycle] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(TOTALS_KEY) ?? '{}') ?? {};
+    } catch {
+      return {};
+    }
+  });
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [fileName, setFileName] = useState('');
@@ -202,6 +214,12 @@ function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
   }, [records]);
 
+  useEffect(() => {
+    localStorage.setItem(TOTALS_KEY, JSON.stringify(totalsByCycle));
+  }, [totalsByCycle]);
+
+  const totals = totalsByCycle[month] ?? null;
+
   const calculation = useMemo(() => {
     const cycleRows = records
       .filter((record) => record.date >= dateKey(start) && record.date <= dateKey(end))
@@ -209,23 +227,41 @@ function App() {
       .sort((a, b) => a.date.localeCompare(b.date));
     const workedRows = cycleRows.filter((row) => row.result.kind === 'worked');
     const incomplete = cycleRows.filter((row) => row.result.kind === 'incomplete');
-    const extra = workedRows.reduce((sum, row) => sum + Math.max(0, row.result.delta), 0);
-    const deficit = workedRows.reduce((sum, row) => sum + Math.max(0, -row.result.delta), 0);
+    // O totalizado do Forponto, quando existe para o ciclo, vale mais que as batidas diárias.
+    const extra = totals ? totals.he50 : workedRows.reduce((sum, row) => sum + Math.max(0, row.result.delta), 0);
+    const deficit = totals ? totals.neg : workedRows.reduce((sum, row) => sum + Math.max(0, -row.result.delta), 0);
     const balance = extra - deficit;
     const neededToTarget = Math.max(0, balance + 5);
     const weekdayKeys = weekdaysBetween(start, end);
     const recordedDates = new Set(cycleRows.filter((row) => row.result.kind !== 'incomplete').map((row) => row.date));
     const missing = weekdayKeys.filter((day) => !recordedDates.has(day)).length;
-    const hasImportedRecords = cycleRows.length > 0;
-    return { cycleRows, workedRows, incomplete, extra, deficit, balance, neededToTarget, missing, hasImportedRecords };
-  }, [records, start, end]);
+    const hasImportedRecords = cycleRows.length > 0 || Boolean(totals);
+    const hasDailyRows = cycleRows.length > 0;
+    return { cycleRows, workedRows, incomplete: totals ? [] : incomplete, extra, deficit, balance, neededToTarget, missing, hasImportedRecords, hasDailyRows };
+  }, [records, totals, start, end]);
 
   async function importFile(file) {
     if (!file) return;
     setError('');
     setNotice('');
     try {
-      const { records: imported, skipped } = await parseWorkbook(await file.arrayBuffer());
+      const parsed = await parseWorkbook(await file.arrayBuffer());
+      if (parsed.kind === 'totals') {
+        const { employees, saldoArquivo, ...summary } = parsed.totals;
+        const cycle = summary.cycleMonth ?? month;
+        setTotalsByCycle((current) => ({ ...current, [cycle]: summary }));
+        setMonth(cycle);
+        setFileName(file.name);
+        const upTo = summary.periodEnd ? ` até ${summary.periodEnd.split('-').reverse().join('/')}` : '';
+        const notes = [`Totais do Forponto${upTo} importados.`];
+        if (employees > 1) notes.push(`A planilha tem ${employees} funcionários; usei o primeiro.`);
+        if (saldoArquivo !== null && saldoArquivo !== summary.saldo) {
+          notes.push(`Atenção: a última coluna da planilha mostra ${formatMinutes(saldoArquivo, true)}, mas H.E. 50% menos H. NEG. dá ${formatMinutes(summary.saldo, true)}.`);
+        }
+        setNotice(notes.join(' '));
+        return;
+      }
+      const { records: imported, skipped } = parsed;
       const unique = new Map();
       imported.forEach((record) => unique.set(record.date, record));
       setRecords((current) => {
@@ -246,11 +282,17 @@ function App() {
 
   function clearCycle() {
     setRecords((current) => current.filter((record) => record.date < dateKey(start) || record.date > dateKey(end)));
+    setTotalsByCycle((current) => {
+      const { [month]: _removed, ...rest } = current;
+      return rest;
+    });
     setFileName('');
     setNotice('Registros deste ciclo removidos.');
     setError('');
   }
 
+  const totalsEnd = totals?.periodEnd ? new Date(`${totals.periodEnd}T12:00:00`) : null;
+  const daysLeft = totalsEnd ? Math.round((end - totalsEnd) / 86400000) : null;
   const closeDate = formatDate(end, { day: '2-digit', month: 'long', year: 'numeric' });
   const periodLabel = `${formatDate(start)} — ${formatDate(end, { day: '2-digit', month: 'short', year: 'numeric' })}`;
   const monthLabel = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(end);
@@ -322,11 +364,19 @@ function App() {
             <strong>{calculation.hasImportedRecords ? formatMinutes(calculation.deficit) : '—'}</strong>
             <p>Diferença em relação à jornada prevista</p>
           </article>
-          <article className="metric-card metric-days">
-            <div className="metric-top"><span>Dias calculados</span><span className="metric-symbol days-symbol"><CalendarDays size={16} /></span></div>
-            <strong>{calculation.workedRows.length}<small> dias</small></strong>
-            <p>{calculation.missing} dias úteis sem registro no ciclo</p>
-          </article>
+          {totals ? (
+            <article className="metric-card metric-days">
+              <div className="metric-top"><span>Apurado até</span><span className="metric-symbol days-symbol"><CalendarDays size={16} /></span></div>
+              <strong>{totalsEnd ? formatDate(totalsEnd, { day: '2-digit', month: 'short' }) : '—'}</strong>
+              <p>{daysLeft === null ? 'Data final não encontrada na planilha' : daysLeft > 0 ? `${daysLeft} ${daysLeft === 1 ? 'dia' : 'dias'} até o fechamento` : 'Ciclo apurado por completo'}</p>
+            </article>
+          ) : (
+            <article className="metric-card metric-days">
+              <div className="metric-top"><span>Dias calculados</span><span className="metric-symbol days-symbol"><CalendarDays size={16} /></span></div>
+              <strong>{calculation.workedRows.length}<small> dias</small></strong>
+              <p>{calculation.missing} dias úteis sem registro no ciclo</p>
+            </article>
+          )}
         </section>
 
         <section className="work-area">
@@ -353,7 +403,7 @@ function App() {
             <div className="upload-icon"><FileSpreadsheet size={22} /></div>
             <div className="upload-copy">
               <strong>{fileName || 'Solte sua planilha aqui'}</strong>
-              <span>Excel .xlsx · colunas de data e batidas</span>
+              <span>Excel .xlsx · relatório totalizado do Forponto ou batidas diárias</span>
             </div>
             <button className="upload-button" onClick={() => fileInput.current?.click()}>
               <Upload size={16} /> Selecionar arquivo
@@ -369,6 +419,38 @@ function App() {
           )}
         </section>
 
+        {totals && (
+          <section className="records-section">
+            <div className="section-heading records-heading">
+              <div>
+                <p className="eyebrow">FORPONTO</p>
+                <h2>Totais do período</h2>
+              </div>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Período</th><th>Faltas</th><th>Ad. noturno</th><th>H.E. 100%</th><th>H.E. 50%</th><th>H. negativas</th><th>Comp. dia</th><th>Saldo</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>{totals.periodStart && totals.periodEnd ? `${formatDate(new Date(`${totals.periodStart}T12:00:00`))} — ${formatDate(new Date(`${totals.periodEnd}T12:00:00`))}` : 'Período não informado'}</strong></td>
+                    <td>{formatMinutes(totals.faltas)}</td>
+                    <td>{formatMinutes(totals.adNot)}</td>
+                    <td>{formatMinutes(totals.he100)}</td>
+                    <td className="positive">{formatMinutes(totals.he50)}</td>
+                    <td className="negative">{formatMinutes(totals.neg)}</td>
+                    <td>{formatMinutes(totals.compDia)}</td>
+                    <td className={totals.saldo > 0 ? 'positive' : totals.saldo < 0 ? 'negative' : ''}><strong>{formatMinutes(totals.saldo, true)}</strong></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div className="table-footnote"><TriangleAlert size={14} /><span>Saldo = H.E. 50% menos H. negativas. H.E. 100% e adicional noturno aparecem só para conferência e não entram no saldo. A meta do ciclo é fechar em −5 min ou menos.</span></div>
+          </section>
+        )}
+
+        {(!totals || calculation.hasDailyRows) && (
         <section className="records-section">
           <div className="section-heading records-heading">
             <div>
@@ -409,6 +491,7 @@ function App() {
           </div>
           <div className="table-footnote"><TriangleAlert size={14} /><span>O saldo considera extras menos horas abaixo da jornada. A meta do ciclo é fechar em −5 min ou menos.</span></div>
         </section>
+        )}
         <footer className="footer"><span>RITMO <span className="brand-period">/</span> {new Date().getFullYear()}</span><span>Seus dados ficam salvos neste navegador.</span></footer>
       </section>
     </main>
