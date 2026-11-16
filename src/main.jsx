@@ -163,6 +163,17 @@ function weekdaysBetween(start, end) {
   return days;
 }
 
+function isWeekend(date) {
+  return date.getDay() === 0 || date.getDay() === 6;
+}
+
+// A jornada é de segunda a sexta: só dá para compensar em dia útil.
+function lastWorkday(date) {
+  const day = new Date(date);
+  while (isWeekend(day)) day.setDate(day.getDate() - 1);
+  return day;
+}
+
 async function downloadTemplate(monthValue) {
   const { default: ExcelJS } = await import('exceljs');
   const { start, end } = periodFor(monthValue);
@@ -292,8 +303,12 @@ function App() {
   }
 
   const totalsEnd = totals?.periodEnd ? new Date(`${totals.periodEnd}T12:00:00`) : null;
-  const daysLeft = totalsEnd ? Math.round((end - totalsEnd) / 86400000) : null;
-  const closeDate = formatDate(end, { day: '2-digit', month: 'long', year: 'numeric' });
+  const closeIsWeekend = isWeekend(end);
+  const lastCompDay = lastWorkday(end);
+  const nextAfterTotals = totalsEnd ? new Date(totalsEnd.getFullYear(), totalsEnd.getMonth(), totalsEnd.getDate() + 1, 12) : null;
+  const workdaysLeft = nextAfterTotals ? weekdaysBetween(nextAfterTotals, lastCompDay).length : null;
+  const noDaysToCompensate = calculation.hasImportedRecords && workdaysLeft === 0 && calculation.balance > -5;
+  const closeDate = formatDate(lastCompDay, { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
   const periodLabel = `${formatDate(start)} — ${formatDate(end, { day: '2-digit', month: 'short', year: 'numeric' })}`;
   const monthLabel = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(end);
   const statusLabel = !calculation.hasImportedRecords
@@ -346,6 +361,23 @@ function App() {
           </div>
         </section>
 
+        {(closeIsWeekend || noDaysToCompensate) && (
+          <div className="weekend-alert" role="alert">
+            <TriangleAlert size={16} />
+            <div>
+              {closeIsWeekend && (
+                <p>
+                  <strong>O fechamento cai em {formatDate(end, { weekday: 'long' })}, dia {formatDate(end, { day: '2-digit', month: '2-digit' })}.</strong>{' '}
+                  A jornada é de segunda a sexta e não dá para compensar no fim de semana. O último dia para compensar é {formatDate(lastCompDay, { weekday: 'long', day: '2-digit', month: '2-digit' })}.
+                </p>
+              )}
+              {noDaysToCompensate && (
+                <p><strong>Não restam dias úteis para compensar neste ciclo.</strong> O saldo de {formatMinutes(calculation.balance, true)} fecha acima da meta de −5 min.</p>
+              )}
+            </div>
+          </div>
+        )}
+
         <section className="metrics" aria-label="Resumo do ciclo">
           <article className="metric-card metric-balance">
             <div className="metric-top"><span>Saldo do ciclo</span><span className="metric-symbol"><Clock3 size={16} /></span></div>
@@ -368,7 +400,7 @@ function App() {
             <article className="metric-card metric-days">
               <div className="metric-top"><span>Apurado até</span><span className="metric-symbol days-symbol"><CalendarDays size={16} /></span></div>
               <strong>{totalsEnd ? formatDate(totalsEnd, { day: '2-digit', month: 'short' }) : '—'}</strong>
-              <p>{daysLeft === null ? 'Data final não encontrada na planilha' : daysLeft > 0 ? `${daysLeft} ${daysLeft === 1 ? 'dia' : 'dias'} até o fechamento` : 'Ciclo apurado por completo'}</p>
+              <p>{workdaysLeft === null ? 'Data final não encontrada na planilha' : workdaysLeft > 0 ? `${workdaysLeft} ${workdaysLeft === 1 ? 'dia útil' : 'dias úteis'} para compensar` : 'Sem dias úteis para compensar'}</p>
             </article>
           ) : (
             <article className="metric-card metric-days">
