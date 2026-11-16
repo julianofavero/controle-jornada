@@ -15,6 +15,10 @@ Para gerar a versão de produção:
 npm run build
 ```
 
+O build gera um único arquivo, `dist/index.html`, com tudo embutido. Dá para abrir com duplo clique, sem servidor. No Windows, o `abrir.bat` instala as dependências, gera o build se faltar e abre o app.
+
+> Não abra o `index.html` da raiz com duplo clique: ele é o arquivo-fonte e só funciona pelo `npm run dev`. Abra o `dist/index.html`.
+
 ## Regras atuais
 
 - O ciclo selecionado vai do dia 16 do mês anterior ao dia 15 do mês selecionado.
@@ -37,16 +41,3 @@ Use o botão **Baixar modelo Excel** para gerar uma planilha do ciclo selecionad
 | Situação | `Trabalhado`, `Folga`, `Feriado`, `Férias` ou `Afastamento` |
 
 O importador lê arquivos `.xlsx` e reconhece cabeçalhos equivalentes em português e inglês. Registros ficam salvos no `localStorage` do navegador.
-
-## Publicar no GitHub
-
-Crie um repositório vazio no GitHub e, nesta pasta, execute:
-
-```bash
-git init
-git add .
-git commit -m "feat: cria controle de jornada"
-git branch -M main
-git remote add origin https://github.com/SEU-USUARIO/SEU-REPOSITORIO.git
-git push -u origin main
-```
