@@ -1,1 +1,52 @@
-# controle-jornada
+# Ritmo | Controle de jornada
+
+Aplicação web para acompanhar horas extras e déficits dentro do ciclo de fechamento da folha.
+
+## Executar localmente
+
+```bash
+npm install
+npm run dev
+```
+
+Para gerar a versão de produção:
+
+```bash
+npm run build
+```
+
+## Regras atuais
+
+- O ciclo selecionado vai do dia 16 do mês anterior ao dia 15 do mês selecionado.
+- A jornada prevista é de 8h48 por dia, de segunda a sexta, com intervalo informado nas batidas.
+- O saldo é calculado como horas acima da jornada menos horas abaixo.
+- A meta é fechar o ciclo com saldo de -5 minutos ou menor.
+- Horas excedentes ficam visíveis para compensação; o resumo também mostra déficits e saldo líquido.
+
+## Planilha
+
+Use o botão **Baixar modelo Excel** para gerar uma planilha do ciclo selecionado. Preencha uma linha por dia com as colunas:
+
+| Coluna | Conteúdo |
+| --- | --- |
+| Data | Data do registro |
+| Entrada | Horário inicial |
+| Início intervalo | Saída para intervalo |
+| Fim intervalo | Retorno do intervalo |
+| Saída | Horário final |
+| Situação | `Trabalhado`, `Folga`, `Feriado`, `Férias` ou `Afastamento` |
+
+O importador lê arquivos `.xlsx` e reconhece cabeçalhos equivalentes em português e inglês. Registros ficam salvos no `localStorage` do navegador.
+
+## Publicar no GitHub
+
+Crie um repositório vazio no GitHub e, nesta pasta, execute:
+
+```bash
+git init
+git add .
+git commit -m "feat: cria controle de jornada"
+git branch -M main
+git remote add origin https://github.com/SEU-USUARIO/SEU-REPOSITORIO.git
+git push -u origin main
+```
